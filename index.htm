@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>La Parrandera - Ondas Parranderas</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Poppins:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            --primary: #ffcc00; /* Amarillo Parrandera */
+            --secondary: #ff0000; /* Rojo Parrandera */
+            --glass: rgba(0, 0, 0, 0.75);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: transparent; font-family: 'Poppins', sans-serif; }
+
+        .widget-wrapper {
+            width: 100%;
+            max-width: 650px;
+            margin: 30px auto;
+            position: relative;
+        }
+
+        .player-card {
+            display: flex;
+            align-items: center;
+            background: var(--glass);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 100px 30px 30px 100px;
+            padding: 12px 25px 12px 12px;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.7);
+            position: relative;
+            z-index: 2;
+            overflow: hidden;
+        }
+
+        /* Canvas del Espectro Líquido Parrandero */
+        #visualizer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            opacity: 0.9;
+        }
+
+        .art-zone {
+            width: 110px; height: 110px;
+            flex-shrink: 0; margin-right: 20px;
+            z-index: 5;
+        }
+
+        #cover-art {
+            width: 100%; height: 100%;
+            border-radius: 50%; object-fit: cover;
+            border: 4px solid var(--primary);
+            box-shadow: 0 0 20px rgba(255, 204, 0, 0.4);
+            animation: rotateDisk 18s linear infinite;
+            animation-play-state: paused;
+        }
+
+        .info-zone { flex-grow: 1; overflow: hidden; color: #fff; z-index: 5; }
+
+        .station-label {
+            font-family: 'Bebas Neue', cursive;
+            font-size: 1.1rem; color: var(--primary);
+            letter-spacing: 2.5px;
+            text-shadow: 2px 2px 4px #000;
+        }
+
+        .marquee { width: 100%; overflow: hidden; white-space: nowrap; margin: 5px 0; }
+        #song-title { 
+            display: inline-block; 
+            font-size: 1.5rem; 
+            font-weight: 700; 
+            text-transform: uppercase;
+            text-shadow: 2px 2px 5px #000;
+        }
+
+        .scroll { animation: scrollLeft 10s linear infinite; }
+
+        .actions { display: flex; align-items: center; gap: 15px; margin-top: 5px; }
+
+        .btn-play {
+            width: 55px; height: 55px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none; border-radius: 50%; color: #fff;
+            cursor: pointer; font-size: 1.3rem;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 5px 15px rgba(255, 0, 0, 0.3);
+        }
+
+        .vol-slider { 
+            width: 90px; 
+            accent-color: var(--primary); 
+            cursor: pointer; 
+        }
+
+        @keyframes scrollLeft { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+        @keyframes rotateDisk { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        @media (max-width: 480px) {
+            .player-card { flex-direction: column; border-radius: 40px; text-align: center; }
+            .art-zone { margin-right: 0; margin-bottom: 15px; width: 140px; height: 140px; }
+            .actions { justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="widget-wrapper">
+        <div class="player-card">
+            <canvas id="visualizer"></canvas>
+            
+            <div class="art-zone">
+                <img src="logo0.jpg" id="cover-art" onerror="this.src='https://i.postimg.cc/PfWvhDD0/unnamed-(29).jpg'">
+            </div>
+
+            <div class="info-zone">
+                <div class="station-label">LA PARRANDERA 102.1 FM</div>
+                <div class="marquee">
+                    <div id="song-title">CONECTANDO...</div>
+                </div>
+                
+                <div class="actions">
+                    <button class="btn-play" id="playBtn"><i class="fas fa-play" id="pIcon"></i></button>
+                    <input type="range" id="volume" min="0" max="1" step="0.1" value="0.8" class="vol-slider">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <audio id="radioSource" crossorigin="anonymous"></audio>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        const STREAM_NAME = "cnuhxaknvxpvv";
+        const audio = document.getElementById("radioSource");
+        audio.src = "https://stream.zeno.fm/" + STREAM_NAME;
+
+        let context, analyser, src, canvas, ctx;
+        let setupDone = false;
+
+        function setupVisualizer() {
+            if (setupDone) return;
+            try {
+                context = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = context.createAnalyser();
+                canvas = document.getElementById("visualizer");
+                ctx = canvas.getContext("2d");
+
+                src = context.createMediaElementSource(audio);
+                src.connect(analyser);
+                analyser.connect(context.destination);
+
+                analyser.fftSize = 256; 
+                analyser.smoothingTimeConstant = 0.88; // Movimiento fluido tipo marea
+
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                
+                function draw() {
+                    requestAnimationFrame(draw);
+                    analyser.getByteFrequencyData(dataArray);
+                    
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // GRADIENTE PARRANDERO (Rojo a Amarillo)
+                    let gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
+                    gradient.addColorStop(0, "rgba(255, 0, 0, 0.2)"); // Rojo profundo traslúcido abajo
+                    gradient.addColorStop(0.6, "rgba(255, 0, 0, 0.6)"); // Rojo vibrante medio
+                    gradient.addColorStop(1, "rgba(255, 204, 0, 0.9)"); // Amarillo brillante en la superficie
+
+                    ctx.fillStyle = gradient;
+                    
+                    // DIBUJO DE ONDA LÍQUIDA
+                    ctx.beginPath();
+                    let sliceWidth = canvas.width / (bufferLength / 1);
+                    let x = 0;
+
+                    for (let i = 0; i < bufferLength; i++) {
+                        let barHeight = dataArray[i] / 1.4; // Altura de la marea
+                        let y = canvas.height - barHeight;
+
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            let prevI = i - 1;
+                            let prevBarHeight = dataArray[prevI] / 1.4;
+                            let prevX = x - sliceWidth;
+                            let prevY = canvas.height - prevBarHeight;
+
+                            // Suavizado Bézier para forma de agua
+                            ctx.bezierCurveTo(prevX + sliceWidth/2, prevY, x - sliceWidth/2, y, x, y);
+                        }
+                        x += sliceWidth;
+                        if (x > canvas.width) break;
+                    }
+
+                    ctx.lineTo(canvas.width, canvas.height);
+                    ctx.lineTo(0, canvas.height);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // Línea de brillo en la cresta
+                    ctx.lineWidth = 3;
+                    ctx.strokeStyle = "rgba(255, 204, 0, 0.3)";
+                    ctx.stroke();
+                }
+                draw();
+                setupDone = true;
+            } catch (e) { console.error("Visualizer Error", e); }
+        }
+
+        // METADATOS
+        let eventSource = new EventSource("https://api.zeno.fm/mounts/metadata/subscribe/" + STREAM_NAME);
+        eventSource.onmessage = (e) => {
+            let data = JSON.parse(e.data);
+            if (data.streamTitle) {
+                let song = data.streamTitle.split(' - ')[1] || data.streamTitle;
+                const titleEl = $("#song-title");
+                titleEl.text(song.toUpperCase());
+                
+                if (titleEl[0].scrollWidth > $(".marquee").width()) {
+                    titleEl.html(song.toUpperCase() + " &nbsp;&nbsp;&nbsp; " + song.toUpperCase()).addClass("scroll");
+                } else {
+                    titleEl.removeClass("scroll");
+                }
+
+                let q = data.streamTitle.replace(/RADIO|102\.1|FM|PROMO/gi, "").trim();
+                fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&limit=1&entity=song`)
+                    .then(r => r.json()).then(j => {
+                        let img = (j.results && j.results[0]) ? j.results[0].artworkUrl100.replace('100x100bb', '400x400bb') : "logo0.jpg";
+                        $("#cover-art").attr("src", img);
+                    }).catch(() => $("#cover-art").attr("src", "logo0.jpg"));
+            }
+        };
+
+        // CONTROLES
+        $("#playBtn").on('click', function() {
+            if (audio.paused) {
+                if (context && context.state === 'suspended') context.resume();
+                setupVisualizer();
+                audio.load();
+                audio.play();
+                $("#pIcon").attr("class", "fas fa-pause");
+                $("#cover-art").css("animation-play-state", "running");
+            } else {
+                audio.pause();
+                $("#pIcon").attr("class", "fas fa-play");
+                $("#cover-art").css("animation-play-state", "paused");
+            }
+        });
+
+        $("#volume").on('input', function() { audio.volume = $(this).val(); });
+    </script>
+</body>
+</html>
